@@ -13,20 +13,35 @@ import landingTemplate from './lib/landingTemplate.js';
 import * as moch from './moch/moch.js';
 
 const router = new Router();
-const client = createClient({
-  url: process.env.REDIS_URL,
-})
-await client.connect()
-const limiter = rateLimit({
+const limiterOptions = {
   windowMs: 24 * 60 * 60 * 1000, // 1 day
   limit: 5000,
   legacyHeaders: false,
   passOnStoreError: true,
   keyGenerator: (req) => requestIp.getClientIp(req),
-  store: new RedisStore({
-    sendCommand: (...args) => client.sendCommand(args),
-  }),
-})
+};
+let limiter;
+const redisUrl = process.env.REDIS_URL;
+if (redisUrl) {
+  const client = createClient({ url: redisUrl });
+  client.on('error', (error) => {
+    console.warn('Redis client error:', error);
+  });
+  try {
+    await client.connect();
+    limiter = rateLimit({
+      ...limiterOptions,
+      store: new RedisStore({
+        sendCommand: (...args) => client.sendCommand(args),
+      }),
+    });
+  } catch (error) {
+    console.warn('Redis connect failed, using in-memory rate limit:', error);
+    limiter = rateLimit(limiterOptions);
+  }
+} else {
+  limiter = rateLimit(limiterOptions);
+}
 
 router.use(cors())
 router.get('/', (_, res) => {
